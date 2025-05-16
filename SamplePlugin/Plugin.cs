@@ -1,10 +1,13 @@
-﻿using Dalamud.Game.Command;
+using Dalamud.Game.Command;
+using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
-using System.IO;
-using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game;
+using SamplePlugin.Data;
 using SamplePlugin.Windows;
+using System;
+using System.IO;
 
 namespace SamplePlugin;
 
@@ -16,12 +19,14 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    [PluginService] internal static WeatherManager WeatherManager { get; private set; }
 
-    private const string CommandName = "/pmycommand";
+
+    private const string WeatherCommand = "/weather";
 
     public Configuration Configuration { get; init; }
 
-    public readonly WindowSystem WindowSystem = new("SamplePlugin");
+    public readonly WindowSystem WindowSystem = new("Weather Plugin");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
 
@@ -31,31 +36,51 @@ public sealed class Plugin : IDalamudPlugin
 
         // you might normally want to embed resources and load them from the manifest stream
         var goatImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "goat.png");
-
+        
         ConfigWindow = new ConfigWindow(this);
         MainWindow = new MainWindow(this, goatImagePath);
 
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
 
-        CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
+        // Loads the Regions and Zones from the game data
+        try {
+            RegionLoader regionLoader = new RegionLoader();
+            var regions = regionLoader.BuildRegionToZoneMap();
+
+            foreach (var region in regions)
+            {
+                Log.Information($"Region: {region.Key}");
+                foreach (var zone in region.Value)
+                {
+                    Log.Information($"  Zone: {zone}");
+                }
+            }
+        }
+        catch (Exception ex)
         {
-            HelpMessage = "A useful message to display in /xlhelp"
+            Log.Error($"Failed to load regions: {ex.Message}");
+        }
+
+        // Setup the command manager to listen for our custom command
+        CommandManager.AddHandler(WeatherCommand, new CommandInfo(OnCommand)
+        {
+            HelpMessage = "Pick the weather you want to be notified for"
         });
 
+
+        // Setup the plugin interface to listen for events
         PluginInterface.UiBuilder.Draw += DrawUI;
-
-        // This adds a button to the plugin installer entry of this plugin which allows
-        // to toggle the display status of the configuration ui
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUI;
-
-        // Adds another button that is doing the same but for the main ui of the plugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
 
         // Add a simple message to the log with level set to information
         // Use /xllog to open the log window in-game
         // Example Output: 00:57:54.959 | INF | [SamplePlugin] ===A cool log message from Sample Plugin===
-        Log.Information($"===A cool log message from {PluginInterface.Manifest.Name}===");
+        Log.Information("Plugin loaded successfully.");
+        Log.Information($"{PluginInterface.Manifest.Name}");
+        Log.Information($"Version: {PluginInterface.Manifest.Description}");
+        
     }
 
     public void Dispose()
@@ -65,7 +90,7 @@ public sealed class Plugin : IDalamudPlugin
         ConfigWindow.Dispose();
         MainWindow.Dispose();
 
-        CommandManager.RemoveHandler(CommandName);
+        CommandManager.RemoveHandler(WeatherCommand);
     }
 
     private void OnCommand(string command, string args)
